@@ -1,0 +1,58 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use Data::Dumper;
+use DBI;
+use Encode qw(decode encode);
+use HTML::Entities qw(decode_entities);
+use Storable qw(nstore retrieve);
+use Time::HiRes qw(sleep);
+use XML::LibXML::Reader;
+
+
+
+my $xml = XML::LibXML::Reader->new(location => $ARGV[0])
+    or die $!;
+
+my $dbh = DBI->connect("DBI:mysql:database=odyssey;mysql_enable_utf8=1", "odyssey", "odyssey", );
+local $dbh->{RaiseError} = 1;
+
+my $articles_sth = $dbh->prepare('INSERT INTO wiki_articles VALUES(?,?)');
+my $redirect_sth = $dbh->prepare('INSERT INTO wiki_redirect VALUES(?,?)');
+
+my $title;
+
+while ($xml->read) {
+    if ($title) {
+        if ($xml->name eq 'text') {
+            parse_text($title, $xml->readInnerXml);
+
+            undef $title;
+        }
+    }
+    else {
+        if ($xml->name eq 'title') {
+            $title = $xml->readInnerXml;
+        }
+    }
+}
+
+
+
+sub parse_text
+{
+    my($title, $text) = @_;
+
+    $title = decode_entities( encode('UTF-8', $title) );
+    $text  = decode_entities( encode('UTF-8', $text) );
+
+    if ( $text =~ m{\#REDIRECT \[\[(.*?)\]\]} ) {
+        my $new_title = $1;
+        $redirect_sth->execute($title, $new_title);
+    }
+    else {
+        $articles_sth->execute($title, $text);
+    }
+}

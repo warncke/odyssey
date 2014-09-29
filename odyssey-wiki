@@ -1,0 +1,368 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use Data::Dumper;
+use Encode qw(decode encode);
+use JSON::XS;
+use LWP::UserAgent;
+use Storable qw(nstore retrieve);
+
+use Odyssey::Wiki::Article;
+
+# maximum number of links to follow when reading articles
+my $MAX_DEPTH = 2;
+# maximum number of entity types to include
+my $MAX_ENTITY_TYPES = 20;
+# minimum number of links that an entity must have to be kept
+# unless it is in the top entity types category
+my $MIN_LINKS = 10;
+# types of entities to pull data and links on
+my $ENTITY_TYPES = {
+    'ORGANIZATION' => 1,
+    'GOVERNMENT AGENCY' => 1,
+    'COMPANY' => 1,
+    'UNIVERSITY' => 1,
+    'PERSON' => 1
+};
+
+my $lwp = LWP::UserAgent->new;
+
+my $odyssey = {
+    entities => {},
+    links    => {},
+    topics   => {},
+    topic_entity_types => {},
+};
+
+my $count = 0;
+
+odyssey_wiki(@ARGV);
+
+sub odyssey_wiki
+{
+    my($title) = @_;
+
+    my $base_page = Odyssey::Wiki::Article->new($title)
+        or die "$title not found";
+
+    my $entities = $odyssey->{entities};
+    my $links    = $odyssey->{links};
+    my $topics   = $odyssey->{topics};
+    my $topic_entity_types = $odyssey->{topic_entity_types};
+
+    my $i = 0;
+
+    for my $link ( @{$base_page->links} )
+    {
+        my $next_page = Odyssey::Wiki::Article->new($link)
+            or next;
+        # the pages linked from the base page are considered
+        # the "topics" of the odyssey
+        $topics->{$link} = $next_page;
+        # these pages may or may not be entities, if they are
+        # then add to the entities list
+        if ($next_page->infobox) {
+            my $infobox = $entities->{$link} = $next_page->infobox;
+            # keep track on the entity types for the primary topics
+            $topic_entity_types->{ $infobox->{entity_type} } = 1;
+
+            find_linked_entities($next_page, 0);
+        }
+
+    }
+
+    entity_analysis();
+
+    # these are all the entities that will go into the web
+    # interface
+    my $all_web_entities = {};
+    my $web_entities;
+
+    # build topics file which is the main set of entities
+    # displayed when odyssey starts
+    $web_entities = build_topics();
+    $all_web_entities->{$_} = $web_entities->{$_} for keys %$web_entities;
+    # build person entities into the people entity file
+    $web_entities = build_entities('people', 'PERSON');
+    $all_web_entities->{$_} = $web_entities->{$_} for keys %$web_entities;
+    # build entities for the institutions file
+    $web_entities = build_entities(
+        'institutions',
+        'ORGANIZATION',
+        'GOVERNMENT AGENCY',
+        'UNIVERSITY'
+    );
+    $all_web_entities->{$_} = $web_entities->{$_} for keys %$web_entities;
+
+    # build the link file for each entity which has all of the
+    # other entities that entity links to
+    build_link_files($all_web_entities);
+}
+
+# build data files for entities
+sub build_entities
+{
+    my($type_name, @entity_types) = @_;
+
+    my $entity_types = { map {$_ => 1} @entity_types };
+
+    my $entities = $odyssey->{entities};
+    my $links    = $odyssey->{links};
+
+    # data for export to web
+    my $web_entities = {};
+
+    while (my($name, $entity) = each %$entities)
+    {
+        # only deal with entities matching types
+        next unless $entity_types->{ $entity->{entity_type} };
+        # get page object
+        my $page = Odyssey::Wiki::Article->new($name)
+            or next;
+        # get lat/lng
+        my $geocode = $page->geocode;
+        $entity->{geocode} = $geocode if $geocode;
+        # require image (for now)
+        $entity->{image} = get_image( delete $entity->{image_url} )
+            or next;
+        # extract overview text from wiki article
+        $entity->{overview} = $page->overview;
+
+        $web_entities->{$name} = $entity;
+    }
+
+    open(my $out, '>', "json/".$type_name.".json");
+    my $json = JSON->new->utf8->encode($web_entities);
+    $json = decode('UTF-8', $json);
+    print $out $json;
+    close $out;
+
+    return $web_entities;
+}
+
+# build the link file for each entity which has all of the
+# other entities that entity links to
+sub build_link_files
+{
+    my($entities) = @_;
+
+    my $links = $odyssey->{links};
+
+    while (my($name, $entity) = each %$entities)
+    {
+        my $entity_links = {};
+        # recursively find all links
+        find_links($entities, $name, $entity_links, 0);
+
+        my $file_name = lc $name;
+        $file_name =~ s/\W/-/g;
+
+        open(my $out, '>', "json/".$file_name."-links.json");
+        my $json = JSON->new->utf8->encode($entity_links);
+        $json = decode('UTF-8', $json);
+        print $out $json;
+        close $out;
+    }
+}
+
+# build the main data file that contains information about our topics and the
+# entities that they are linked to
+sub build_topics
+{
+    my $entities = $odyssey->{entities};
+    my $links    = $odyssey->{links};
+    my $topics   = $odyssey->{topics};
+
+    # data to export for web
+    my $web_topics = {};
+
+    while (my($name, $page) = each %$topics)
+    {
+        # require entity (for now)
+        my $entity = $entities->{$name}
+            or next;
+        # get lat/lng
+        $entity->{geocode} = $page->geocode
+            or next;
+        # require image (for now)
+        $entity->{image} = get_image( delete $entity->{image_url} )
+            or next;
+        # extract overview text from wiki article
+        $entity->{overview} = $page->overview;
+
+        $web_topics->{$name} = $entity;
+    }
+
+    open(my $out, '>', 'json/topics.json');
+    my $json = JSON->new->utf8->encode($web_topics);
+    $json = decode('UTF-8', $json);
+    print $out $json;
+    close $out;
+
+    return $web_topics;
+}
+
+# The goal here is to weed out entities that are not relevent to our topics
+# wikipedia has lots of links to random stuff so we try to identify the entities
+# that are actually related to our main topic
+sub entity_analysis
+{
+    my $entities = $odyssey->{entities};
+    my $links    = $odyssey->{links};
+    my $topics   = $odyssey->{topics};
+    my $topic_entity_types = $odyssey->{topic_entity_types};
+
+    my $entity_types = {};
+    # start by doing a histogram of entity types so that we
+    # can cut uncommon ones
+    for my $entity (values %$entities)
+    {
+        my $entity_type = $entity->{entity_type}
+            or next;
+
+        $entity_types->{$entity_type}++;
+    }
+    # sort by most common
+    my @entity_types = sort {
+        $entity_types->{$b} <=> $entity_types->{$a}
+    } keys %$entity_types;
+
+    # get up to top 20 entity types
+    if (@entity_types + keys %$topic_entity_types > $MAX_ENTITY_TYPES) {
+        @entity_types = splice(@entity_types, 0, $MAX_ENTITY_TYPES - keys %$topic_entity_types);
+    }
+
+    # keep topic entity types no matter what
+    my $top_entity_types = {
+        map {$_ => 1} keys %$topic_entity_types, @entity_types
+    };
+
+    my $entity_links = {};
+
+    # find the most linked entities
+    while (my($name, $links) = each %$links) {
+        $entity_links->{$name} = keys %$links;
+    }
+    # sort by most common
+    my @entity_links = sort {
+        $entity_links->{$b} <=> $entity_links->{$a}
+    } keys %$entity_links;
+
+    # cull entities that are not in the top_entity_types
+    # group and have less than the minimum allowed number
+    # of interlinkages to be considered relevant
+    while (my($name, $entity) = each %$entities)
+    {
+        # keep if top_entity_type
+        next if $top_entity_types->{ $entity->{entity_type} };
+        # keep if entity has the requisite number of links
+        next if keys %{$links->{$name}} >= $MIN_LINKS;
+
+        # delete from entities
+        delete $entities->{$name};
+    }
+
+}
+
+sub find_linked_entities
+{
+    my($page, $level) = @_;
+    # only recurse up to max depth
+    return if $level >= $MAX_DEPTH;
+    # if page has an infobox then treat it as an entity
+    # otherwise do not follow links
+    return unless $page->infobox;
+
+    my $entities = $odyssey->{entities};
+    my $links    = $odyssey->{links};
+
+    for my $link ( @{$page->links} )
+    {
+        if ($count++ % 1000 == 0) {
+            print "$count\n";
+        }
+
+        my $next_page = Odyssey::Wiki::Article->new($link)
+            or next;
+        # skip if page is already linked
+        next if $links->{$page->title}->{$next_page->title}
+            && $links->{$next_page->title}->{$page->title};
+        # only store info and continue for entities
+        my $infobox = $next_page->infobox
+            or next;
+        # only link to and follow desired entity types
+        next unless $ENTITY_TYPES->{ $infobox->{entity_type} };
+        # store link between current page and next page
+        $links->{$page->title}->{$next_page->title} = 1;
+        $links->{$next_page->title}->{$page->title} = 1;
+        # store entity info
+        $entities->{$next_page->title} = $infobox;
+
+        find_linked_entities($next_page, $level+1);
+    }
+}
+
+sub find_links
+{
+    my($entities, $name, $all_links, $level) = @_;
+    # only recurse up to max depth
+    return if $level > $MAX_DEPTH;
+
+    my $links = $odyssey->{links}->{$name}
+        or return;
+
+    for my $link_name (keys %$links) {
+        # only follow links on entities that we are exposing
+        next unless $entities->{$link_name};
+        # sort link names so that we dont get A => B and B => A
+        my @link_names = sort ($name, $link_name);
+        # save link
+        $all_links->{ $link_names[0] } = $link_names[1];
+        # recurse to next level
+        find_links($entities, $link_name, $all_links, $level+1);
+    }
+}
+
+sub get_image
+{
+    my($logo_url) = @_;
+
+    return unless $logo_url;
+
+    my($file_name) = $logo_url =~ m{/([^/]+)$}
+        or return;
+
+    # return file name if it has already been saved
+    return $file_name if -e "images/$file_name";
+
+    my $response = $lwp->get($logo_url);
+
+    if ($response->is_success) {
+        open(my $out, ">", "images/$file_name")
+            or return;
+        print $out $response->content;
+        close $out;
+
+        return $file_name;
+    }
+    # if there was an error then try /en/ instead
+    # of /commons/
+    else {
+        $logo_url =~ s{/commons/}{/en/};
+
+        my $response = $lwp->get($logo_url);
+
+        if ($response->is_success) {
+            open(my $out, ">", "images/$file_name")
+                or return;
+            print $out $response->content;
+            close $out;
+
+            return $file_name;
+        }
+    }
+
+    return;
+}
