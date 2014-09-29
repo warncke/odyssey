@@ -1,0 +1,204 @@
+* { font-family: arimo, sans-serif; }
+
+html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
+
+img {
+    display: block;
+    border: 0;
+}
+
+.slide {
+    text-align: center;
+    max-width: 1000px;
+    margin: auto;
+}
+
+.slide h1 {
+    font-weight: bold;
+    font-size: 4em;
+}
+
+.slide p {
+    font-size: 2em;
+}
+
+.image {
+    float: left;
+    width: 200px;
+    height: 200px;
+    overflow: hidden;
+    background-repeat: no-repeat;
+    background-position: center; 
+    cursor: pointer;
+}
+
+.title {
+    position: fixed;
+    top: 10%;
+    left: 10%;
+    width: 80%;
+    height: 80%;
+    background-color: black;
+    color: white;
+    opacity: .9;
+    overflow: auto;
+    display: none;
+}
+
+.title h1 {
+    text-align: center;
+    font-size: 7em;
+}
+
+.title .col {
+    width: 40%;
+    margin: 0 5%;
+    font-size: 2em;
+    float: left;
+    line-height: 1.5em;
+}
+
+.control {
+    position: fixed;
+    text-align: center;
+    background-color: black;
+    color: white;
+    font-size: 1.5em;
+    padding: .25em;
+    opacity: .9;
+    display: none;
+    z-index: 20;
+}
+
+.control a {
+    color: white;
+}
+
+.view-types {
+    top: 0;
+    left: 0;
+}
+
+.entity-types {
+    top: 0;
+    right: 0;
+}
+
+.user-options {
+    bottom: 0;
+    right: 0;
+}
+
+.map {
+    width: 100%;
+    height: 100%;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 10;
+}
+
+.bubble {
+    background-color: white;
+    border: 4px solid black;
+    position: fixed;
+    top: 100px;
+    left: 150px;
+    width: 500px;
+    height: 500px;
+    display: none;
+}
+
+.bubble-header {
+    background-color: black;
+    color: white;
+    height: 20px;
+    font-size: 18px;
+    overflow: hidden;
+    cursor: move;
+}
+
+.bubble-body {
+    height: 480px;
+    overflow: auto;
+}
+
+.bubble-title {
+    float: left;
+    z-index: 1;
+    max-width: 480px;
+    overflow: hidden;
+}
+
+.bubble-close {
+    float: right;
+    z-index: 2;
+    cursor: pointer;
+}
+
+.bubble-body > div, .bubble-body > h2 {
+    padding: 0 10px;
+}
+
+.bubble-body > img {
+    width: 200px;
+    height: auto;
+    margin: 10px;
+}
+
+.bubble-body ul {
+    list-style-type: none;
+}
+
+div.info {
+    width: 280px;
+    margin-left: 200px;
+    padding: 0;
+}
+
+.note {
+    width: 250px;
+    text-align: center;
+    background-color: #C0C0C0;
+    border: 2px solid black;
+    position: fixed;
+    display: none;
+}
+
+.note textarea {
+    width: 230px;
+}
+
+.highlight {
+    background-color: yellow;
+}
+
+.notes {
+    max-width: 1000px;
+    margin: auto;
+}
+
+.notes > div {
+    margin-bottom: 10px;
+}
+
+.notes .noteText {
+    font-weight: bold;
+}
+
+.pointer {
+    cursor: pointer;
+}
+
+.cb {
+    clear: both;
+}
+
+.fl {
+    float: left;
+}
